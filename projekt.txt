@@ -1,0 +1,459 @@
+; In this game player 1 (P1) competes against player 2 (P2).
+; The goal is to "collect" (hover over) the winning square.
+; The trick is that you don't know which square is winning and which one isn't.
+; There is 1 winning square and 5 that aren't.
+; Your (x,y) coordinates need to fully match match the coordiantes of the winning square 
+; meaning that your square must fully hover over the winning one.
+; P1 will be the one whose square starting direction will be to the left of the center.
+; P2 will be the one whose square starting direction will be to the right of the center.
+;
+; Controls:
+; 			P1: 
+;	  			-up    -> w
+; 	  			-down  -> s
+;	  			-left  -> a
+;	  			-right -> d
+;
+; 			P2: 
+;	 			-up    -> 8
+; 	  			-down  -> 5
+;	 			-left  -> 4
+;	  			-right -> 6
+;
+;
+;	WARNING:
+;	This game contains visual effects that may trigger seizures in individuals with 
+;	epilepsy or photosensitivity. Play in a well-lit room, take breaks, 
+;   and consult a healthcare professional if you have a history of epilepsy or seizures. 
+;	Discontinue playing if you experience any unusual symptoms. 
+;	Player discretion is advised. Enjoy the game responsibly and at your own risk.
+;
+;
+; ENJOY!
+
+JMP main
+JMP isr
+
+; The vertical sync signal.
+vsync: DW 0
+
+; Starting message string
+s1: DB "TRY TO NOT GET    EPILEPTIC      SEIZURE GAME" 
+	DB 0
+    
+; Position (x,y) of a winning square
+squarePos: DW 0
+
+; The ISR to serve the graphics card interrupt requests.
+isr:
+    PUSH A         	; ISR will use register A.
+    IN 1		   	; Check who interrupted 
+    CMP A, 1	   	; Either 1 or 4 (1 - keyboard, 4 graphics card).
+    JE isrKeyboard	; If 1 -> jump to keyboard section.
+    MOV [vsync], 1 	; Set the vsync flag.
+    MOV A, 4       	; Clear the graphics card interrupt request.
+    OUT 2          	; through the I/O register IRQEOI.
+    JMP iret		; Jump to the end.
+    
+isrKeyboard:
+	IN 5 			; Get the keyboard status.
+	AND A, 1 		; Mask out the keydown event.
+	CMP A, 1 		; Is it the keydown event?
+	JE printkey 	; If yes , print out the key code.
+	IN 6 			; Get the key code to clear the keyboard status.
+	JMP keysdone	
+printkey:
+	IN 6 			; Get the key code.
+    ; Check which character was pressed and act accordingly.
+    CMPB AL, 'a'	
+    JE player1
+    CMPB AL, 's'
+    JE player1
+    CMPB AL, 'd'
+    JE player1
+    CMPB AL, 'w'
+    JE player1
+    CMPB AL, '4'
+    JE player2
+    CMPB AL, '5'
+    JE player2
+    CMPB AL, '6'
+    JE player2
+    CMPB AL, '8'
+    JE player2
+    
+player2:
+	MOVB [0x100F], AL ; P2 input store/display in top right cell.
+    JMP keysdone
+player1:
+	MOVB [0x1000], AL ; P1 input store/display in top left cell.
+    
+keysdone:
+	MOV A, 1 		  ; Keyboard interrupt mask.
+	OUT 2 			  ; Keyboard has been serviced.
+    
+iret:
+	POP A 		 ; Restore the register A.
+	IRET         ; Return from interrupt.
+
+; Function wait_frames(count) waits for count frames.
+; Parameter count is given through register C.
+wait_frames:
+wait_frames_loop:
+    MOV A, [vsync]          ; Check the current vsync value.
+    CMP A, 0                ; If still 0,
+    JE wait_frames_loop     ; check it again.
+    MOV [vsync], 0          ; The vsync signal received. Reset it.
+    DEC C                   ; Count the received frame.
+    CMP C, 0                ; When enough frames passed,
+    JE wait_frames_return   ; return from the function.
+    JMP wait_frames_loop    ; Otherwise, wait another frame.
+wait_frames_return:
+    RET
+
+main:
+    MOV SP, 0x0FFF       ; Initialize the stack pointer.
+
+    ; Set up the graphics screen.
+    MOV A, 1             ; Set the graphics card to TEXT mode
+    OUT 7                ; through register VIDMODE.
+    
+    ; Display the following text
+    MOVB [0x1001], '<'
+    MOVB [0x1002], '-'
+    MOVB [0x1003], 'P'
+    MOVB [0x1004], '1'
+    MOVB [0x1005], '-'
+    MOVB [0x1006], '-'
+    MOVB [0x1007], 'V'
+    MOVB [0x1008], 'S'
+    MOVB [0x1009], '-'
+    MOVB [0x100A], '-'
+    MOVB [0x100B], 'P'
+    MOVB [0x100C], '2'
+    MOVB [0x100D], '-'
+    MOVB [0x100E], '>'
+    
+    
+    ; Display the string on the starting screen of the game
+    MOV C, s1 		; Pointer to string.
+	MOV D, 2 		; Pointer to screen cells.
+loop1:
+	MOV A, D 		; Activate the screen cell
+	OUT 8 			; through register VIDADDR.
+    
+    IN 10			; Choose a random number
+   	AND A, 0xFF		; to set a random color.
+    
+	MOVB AH, [C] 	; Get a character.
+	CMPB AH, 0 		; The end of the string?
+	JE exit 		; If yes , terminate.
+	OUT 9 			; Display the character.
+	INC C 			; Next character.
+	ADD D, 2 		; Next screen cell.
+    MOV B, D 		; Examine the cell address.
+	AND B, 0x00FF 	; Mask out the column bytes.
+	CMP B, 32 		; Check if past the 16 - th column.
+	JB loop1 		; If not , continue.
+	ADD D, 224 		; Otherwise skip the rest of the line.
+	JMP loop1    
+exit:
+
+
+    ; Initialize the object 1 position - P1.
+    MOV A, 0xA306		 ; Sprite 1 (Symbol, color).
+    OUT 8
+    MOV A, 0xFE00		 ; Square shape.
+    OUT 9
+    MOV A, 0xA308		 ; Sprite 1 (x,y).
+    OUT 8
+    MOV A, 0x7878		 ; x=120, y=120.
+    OUT 9
+    
+    ; Initialize the object 2 position - P2.
+    MOV A, 0xA30A		 ; Sprite 2 (Symbol, color).
+    OUT 8
+    MOV A, 0xFE00		 ; Square shape.
+    OUT 9
+    MOV A, 0xA30C		 ; Sprite 2 (x,y).
+    OUT 8
+    MOV A, 0x7878		 ; x=120, y=120.
+    OUT 9
+    
+    ; Initialize the object 3 position - Winning square.
+    MOV A, 0xA30E		 ; Sprite 3 (Symbol, color).
+    OUT 8
+    MOV A, 0xFE00		 ; Square shape.
+    OUT 9
+    MOV A, 0xA310		 ; Sprite 3 (x,y).
+    OUT 8
+    IN 10				 ; Set a random position
+    MOV [squarePos], A	 ; and save it.
+    OUT 9
+    
+    ; Initialize the object 4 position - Fake square.
+    MOV A, 0xA312		 ; Sprite 4 (Symbol, color).
+    OUT 8
+    MOV A, 0xFE00		 ; Square shape.
+    OUT 9
+    MOV A, 0xA314		 ; Sprite 4 (x,y).
+    OUT 8
+    IN 10				 ; Set a random position.
+    OUT 9
+    
+    ; Initialize the object 5 position - Fake square.
+    MOV A, 0xA316		 ; Sprite 5 (Symbol, color).
+    OUT 8
+    MOV A, 0xFE00		 ; Square shape.
+    OUT 9
+    MOV A, 0xA318		 ; Sprite 5 (x,y).
+    OUT 8
+    IN 10				 ; Set a random position.
+    OUT 9
+    
+    ; Initialize the object 6 position - Fake square.
+    MOV A, 0xA31A		 ; Sprite 6 (Symbol, color).
+    OUT 8
+    MOV A, 0xFE00		 ; Square shape.
+    OUT 9
+    MOV A, 0xA31C		 ; Sprite 6 (x,y).
+    OUT 8
+    IN 10				 ; Set a random position.
+    OUT 9
+    
+    ; Initialize the object 7 position - Fake square.
+    MOV A, 0xA31E		 ; Sprite 7 (Symbol, color).
+    OUT 8
+    MOV A, 0xFE00		 ; Square shape.
+    OUT 9
+    MOV A, 0xA320		 ; Sprite 7 (x,y).
+    OUT 8
+    IN 10				 ; Set a random position.	
+    OUT 9
+    
+    ; Initialize the object 8 position - Fake square.
+    MOV A, 0xA322		 ; Sprite 8 (Symbol, color).
+    OUT 8
+    MOV A, 0xFE00		 ; Square shape.
+    OUT 9
+    MOV A, 0xA324		 ; Sprite 8 (x,y).
+    OUT 8
+    IN 10				 ; Set a random position.
+    OUT 9
+
+    ; Enable graphics card and keyboard interrupts.
+    MOV A, 5             ; Mask the graphics card and keyboard interrupts.
+    OUT 0                ; Enable the graphics card and keyboard interrupts.
+    STI                  ; Enable interrupts globally.
+
+    ; Wait for 4 seconds before the animation starts.
+    MOV C, 200
+    CALL wait_frames     ; Call wait_frames(200).
+    
+    
+    ; Scroll vertically for 48 pixels so that we hide the starting message.
+    MOV A, 0xA304 		 ; Vertical scroll information
+	OUT 8 				 ; in VRAM.
+	MOV A, 48 			 ; Scroll vertically by 48 pixels
+	OUT 9 				 ; by overwriting the existing value.
+
+    ; Enter the animation loop.
+loop3:
+
+	MOV A, 0xA300 		 ; Background color information
+	OUT 8 		  		 ; in VRAM.
+    IN 10		  		 ; Get a random color
+	OUT 9 		  		 ; and set it as a background.
+
+	; Change color of all squares.
+    ; Let the moving and static squares be separetly sinhronized
+    ; by adding 1 to the two moving squares and 2 to the nonmoving.
+	MOV A, 0xA306		  
+    OUT 8				 
+    IN 9
+    ADDB AL, 1
+    OUT 9
+    
+    MOV A, 0xA30A
+    OUT 8
+    IN 9
+    ADDB AL, 1
+    OUT 9
+    
+    MOV A, 0xA30E
+    OUT 8
+    IN 9
+    ADDB AL, 2
+    OUT 9
+    
+    MOV A, 0xA312
+    OUT 8
+    IN 9
+    ADDB AL, 2
+    OUT 9
+    
+    MOV A, 0xA316
+    OUT 8
+    IN 9
+    ADDB AL, 2
+    OUT 9
+    
+    MOV A, 0xA31A
+    OUT 8
+    IN 9
+    ADDB AL, 2
+    OUT 9
+    
+    MOV A, 0xA31E
+    OUT 8
+    IN 9
+    ADDB AL, 2
+    OUT 9
+    
+    MOV A, 0xA322
+    OUT 8
+    IN 9
+    ADDB AL, 2
+    OUT 9
+
+
+	MOV A, 0xA308	 		; Sprite 1 (x,y)
+    OUT 8
+    IN 9			 		; VIDDATA -> A
+    
+    ; For P1.
+    ; Check which key was pressed last and act accordingly.
+    MOVB DL, [0x1000]		
+    CMPB DL, 119
+    JE up1
+    CMPB DL, 115
+    JE down1
+    CMPB DL, 97
+    JE left1
+    CMPB DL, 100
+    JE right1
+    
+   ; Depending on the key pressed 
+   ; move square in that direction.
+   ; And check if the (x,y) position matches with the winning square -> halt.
+   ; P1 starting movement will be to the left, thus we put left1 section on top.
+left1:
+    ADDB AH, 0xFF	 		; x=x-1
+    CMP A, [squarePos]
+    JE halt1
+    JMP out1
+    
+down1:
+    ADDB AL, 1		 		; y=y+1
+    CMP A, [squarePos]
+    JE halt1
+    JMP out1   
+    
+up1:
+	ADDB AL, 0xFF	 		; y=y-1
+    CMP A, [squarePos]
+    JE halt1
+    JMP out1
+
+right1:
+    ADDB AH, 1		 		; x=x+1
+    CMP A, [squarePos]
+    JE halt1
+    JMP out1
+
+       
+out1:
+    OUT 9			 		; A -> VIDDATA
+    
+    
+	MOV A, 0xA30C	 		; Sprite 2 (x,y)
+    OUT 8
+    IN 9			 		; VIDDATA -> A
+    
+    ; For P2.
+    ; Check which key was pressed last and act accordingly.
+    MOVB DL, [0x100F]
+    CMPB DL, 56
+    JE up2
+    CMPB DL, 53
+    JE down2
+    CMPB DL, 52
+    JE left2
+    CMPB DL, 54
+    JE right2
+    
+   ; Depending on the key pressed 
+   ; move square in that direction.
+   ; And check if the (x,y) position matches with the winning square -> halt.
+   ; P2 starting movement will be to the right, thus we put right2 section on top.
+right2:
+    ADDB AH, 1		 		; x=x+1
+    CMP A, [squarePos]
+    JE halt2
+    JMP out2
+    
+down2:
+    ADDB AL, 1		 		; y=y+1
+    CMP A, [squarePos]
+    JE halt2
+    JMP out2    
+    
+up2:
+	ADDB AL, 0xFF	 		; y=y-1
+    CMP A, [squarePos]
+    JE halt2
+    JMP out2
+      
+left2:
+    ADDB AH, 0xFF	 		; x=x-1
+    CMP A, [squarePos]
+    JE halt2
+    JMP out2
+       
+out2:
+    OUT 9			 		; A -> VIDDATA  
+  
+  	
+    
+    MOV C, 1        		; Wait for 25 frames.
+    CALL wait_frames 		; Call wait_frames(25).
+    JMP loop3         		; Repeat for the next frame.
+    
+    
+    ; If P1 won display the following message.
+halt1:
+	MOVB [0x1011], ' '
+    MOVB [0x1012], 'P'
+    MOVB [0x1013], 'L'
+    MOVB [0x1014], 'A'
+    MOVB [0x1015], 'Y'
+    MOVB [0x1016], 'E'
+    MOVB [0x1017], 'R'
+    MOVB [0x1018], ' '
+    MOVB [0x1019], '1'
+    MOVB [0x101A], ' '
+    MOVB [0x101B], 'W'
+    MOVB [0x101C], 'O'
+    MOVB [0x101D], 'N'
+    MOVB [0x101E], ' '
+    JMP halt
+
+	; If P2 won display the following message.
+halt2:
+	MOVB [0x1011], ' '
+    MOVB [0x1012], 'P'
+    MOVB [0x1013], 'L'
+    MOVB [0x1014], 'A'
+    MOVB [0x1015], 'Y'
+    MOVB [0x1016], 'E'
+    MOVB [0x1017], 'R'
+    MOVB [0x1018], ' '
+    MOVB [0x1019], '2'
+    MOVB [0x101A], ' '
+    MOVB [0x101B], 'W'
+    MOVB [0x101C], 'O'
+    MOVB [0x101D], 'N'
+    MOVB [0x101E], ' '
+    
+halt:
+    HLT 
